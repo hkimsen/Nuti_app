@@ -28,8 +28,8 @@ class MyApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF8F7FC),
         useMaterial3: true,
       ),
-      //home: const Root(),
-      home: const GetStartedScreen(),
+      home: const Root(),
+      //home: const GetStartedScreen(),
       locale: const Locale('vi'),
       supportedLocales: const [
         Locale('vi'),
