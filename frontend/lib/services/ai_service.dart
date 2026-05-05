@@ -1,13 +1,13 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../config/api_config.dart';
 
 class AiService {
-  final String baseUrl = "http://localhost:8080";
+  late final String baseUrl = ApiConfig.getBaseUrl();
 
  Future<String> getMealPlan(Map<String, dynamic> data) async {
   final res = await http.post(
-    //Uri.parse("http://10.0.2.2:8080/api/recommend"),
-    Uri.parse("http://localhost:8080/api/recommend"),
+    Uri.parse("$baseUrl/api/recommend"),
     headers: {"Content-Type": "application/json"},
     body: jsonEncode(data),
   );
