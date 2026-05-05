@@ -1,4 +1,4 @@
-package service;
+package com.senkim.nutrition.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

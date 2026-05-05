@@ -1,6 +1,6 @@
 package com.senkim.nutrition.service;
 
-import com.senkim.nutrition.dto.RecommendationRequest;
+import service.dto.RecommendationRequest;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -8,24 +8,27 @@ public class PromptService {
 
     public String buildPrompt(RecommendationRequest req) {
 
-        return """
-        You are a nutrition expert.
+        double bmi = req.weight / Math.pow(req.height / 100, 2);
 
-        User info:
+        return """
+        You are a professional nutritionist.
+
+        User:
         - Weight: %.1f kg
         - Height: %.1f cm
         - BMI: %.1f
-        - Goal: %s (gain muscle or lose fat)
+        - Goal: %s (lose fat or gain muscle)
         - Duration: %d days
 
         Task:
-        Generate a daily meal plan (breakfast, lunch, dinner).
+        Generate a meal plan for each day.
 
-        IMPORTANT:
-        - Only suggest common foods
-        - Keep calories realistic
-        - Do NOT hallucinate nutrition values
-        - Output JSON format:
+        Rules:
+        - Only suggest realistic foods
+        - DO NOT invent calories
+        - Keep meals simple (breakfast, lunch, dinner)
+
+        Output JSON:
         [
           {
             "day": 1,
@@ -37,7 +40,7 @@ public class PromptService {
         """.formatted(
                 req.weight,
                 req.height,
-                req.bmi,
+                bmi,
                 req.goal,
                 req.days
         );

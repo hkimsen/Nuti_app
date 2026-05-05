@@ -1,25 +1,53 @@
 package com.senkim.nutrition.controller;
 
-import com.senkim.nutrition.dto.RecommendationRequest;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.senkim.nutrition.service.AiService;
-import com.senkim.nutrition.service.PromptService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 @RestController
-@RequestMapping("/ai")
-@RequiredArgsConstructor
-@CrossOrigin("*")
+@RequestMapping("/api")
+@CrossOrigin
 public class RecommendationController {
 
     private final AiService aiService;
-    private final PromptService promptService;
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    public RecommendationController(AiService aiService) {
+        this.aiService = aiService;
+    }
 
     @PostMapping("/recommend")
-    public String recommend(@RequestBody RecommendationRequest request) {
+    public Object recommend(@RequestBody Map<String, Object> req) {
 
-        String prompt = promptService.buildPrompt(request);
+        try {
+            System.out.println("Recommend endpoint called with: " + req);
+            
+            // ===== CALL AI =====
+            JsonNode aiResult = aiService.generateMealPlan(req);
 
-        return aiService.generateMealPlan(prompt);
+            if (aiResult == null) {
+                System.out.println("AI returned null");
+                return Map.of(
+                        "error", "AI returned null"
+                );
+            }
+
+            System.out.println("AI Result: " + aiResult.toPrettyString());
+            
+            // ===== RETURN ALL FIELDS FROM AI RESULT =====
+            // The service already includes: bmi, tdee, dailyCalories, plan
+            return mapper.convertValue(aiResult, Map.class);
+
+        } catch (Exception e) {
+            System.out.println("Error in recommend: " + e.getMessage());
+            e.printStackTrace();
+            return Map.of(
+                    "error", "Failed to generate recommendation",
+                    "message", e.getMessage()
+            );
+        }
     }
 }

@@ -1,6 +1,8 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../widgets/base_bottom_sheet.dart';
+import '../services/ai_service.dart';
 
 class AddFoodScreen extends StatefulWidget {
   final String mealType;
@@ -13,25 +15,16 @@ class AddFoodScreen extends StatefulWidget {
 
 class _AddFoodScreenState extends State<AddFoodScreen> {
   final primaryPurple = const Color(0xFFD1C4E9);
+  final aiService = AiService();
 
   String search = "";
+  late Future<List<Map<String, dynamic>>> foodsFuture;
 
-  final List<Map<String, dynamic>> foods = [
-  {
-    "name": "Trứng luộc",
-    "kcal": 155,
-    "carb": 1,
-    "protein": 13,
-    "fat": 11,
-  },
-  {
-    "name": "Bánh mì",
-    "kcal": 200,
-    "carb": 40,
-    "protein": 6,
-    "fat": 2,
-  },
-];
+  @override
+  void initState() {
+    super.initState();
+    foodsFuture = aiService.getFoods();
+  }
 
 void _showFoodBottomSheet(Map<String, dynamic> food) {
   final controller = TextEditingController(text: "100");
@@ -45,9 +38,9 @@ void _showFoodBottomSheet(Map<String, dynamic> food) {
       return StatefulBuilder(
         builder: (context, setState) {
           final ratio = gram / 100;
-          final kcal =
-              (food["kcal"] as num).toDouble() * (gram / 100);
-          final carb = (food["carb"] as num).toDouble() * ratio;
+          final calories =
+              (food["calories"] as num).toDouble() * (gram / 100);
+          final carbs = (food["carbs"] as num).toDouble() * ratio;
           final protein = (food["protein"] as num).toDouble() * ratio;
           final fat = (food["fat"] as num).toDouble() * ratio;
 
@@ -55,9 +48,44 @@ void _showFoodBottomSheet(Map<String, dynamic> food) {
             title: food["name"],
             isEdit: true,
             onCancel: () => Navigator.pop(context),
-            onSave: () {
-              print("Add ${food["name"]} - $gram g");
-              Navigator.pop(context);
+            onSave: () async {
+              // Save to backend
+              try {
+                final prefs = await SharedPreferences.getInstance();
+                final userId = prefs.getInt('userId');
+                
+                if (userId == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Người dùng không được xác thực")),
+                  );
+                  return;
+                }
+
+                await aiService.addMeal(
+                  userId: userId,
+                  foodId: (food["id"] as num).toInt(),
+                  foodName: food["name"],
+                  mealType: widget.mealType,
+                  gram: gram,
+                  calories: calories,
+                  protein: protein,
+                  carbs: carbs,
+                  fat: fat,
+                );
+
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Thêm món thành công")),
+                  );
+                  Navigator.pop(context);
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Lỗi: ${e.toString()}")),
+                  );
+                }
+              }
             },
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -68,8 +96,8 @@ void _showFoodBottomSheet(Map<String, dynamic> food) {
                   });
                 }),
                 const SizedBox(height: 20),
-                _buildAnimatedMacroSection(carb, protein, fat, kcal),
-                const SizedBox(height: 10), // 👈 thêm dòng này
+                _buildAnimatedMacroSection(carbs, protein, fat, calories),
+                const SizedBox(height: 10),
               ],
             ),
           );
@@ -80,8 +108,8 @@ void _showFoodBottomSheet(Map<String, dynamic> food) {
 }
 
 Widget _buildAnimatedMacroSection(
-    double carb, double protein, double fat, double kcal) {
-  final total = carb + protein + fat;
+    double carbs, double protein, double fat, double calories) {
+  final total = carbs + protein + fat;
 
   return Container(
     padding: const EdgeInsets.fromLTRB(90, 20, 90, 20), // Tăng padding để thoáng hơn
@@ -111,7 +139,7 @@ Widget _buildAnimatedMacroSection(
                   centerSpaceRadius: 40,
                   sections: [
                     PieChartSectionData(
-                      value: carb,
+                      value: carbs,
                       color: const Color(0xFF90CAF9),
                       radius: 20, // Độ dày của vòng tròn
                       title: "",
@@ -135,7 +163,7 @@ Widget _buildAnimatedMacroSection(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    "${kcal.toInt()}",
+                    "${calories.toInt()}",
                     style: const TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
@@ -159,7 +187,7 @@ Widget _buildAnimatedMacroSection(
             mainAxisAlignment: MainAxisAlignment.center, // Căn giữa cụm chú thích theo chiều dọc
             crossAxisAlignment: CrossAxisAlignment.stretch, // BẮT BUỘC: Để Row bên trong chiếm hết chiều ngang
             children: [
-              _legendItem("Tinh bột", const Color(0xFF90CAF9), carb),
+              _legendItem("Tinh bột", const Color(0xFF90CAF9), carbs),
               _legendItem("Đạm", const Color(0xFFA5D6A7), protein),
               _legendItem("Béo", const Color(0xFFFFCC80), fat),
             ],
@@ -169,13 +197,6 @@ Widget _buildAnimatedMacroSection(
     ),
   );
 }
-
-  List<Map<String, dynamic>> get filteredFoods {
-    return foods
-        .where((food) =>
-            food["name"].toLowerCase().contains(search.toLowerCase()))
-        .toList();
-  }
 
   String get mealTitle {
     switch (widget.mealType) {
@@ -188,6 +209,13 @@ Widget _buildAnimatedMacroSection(
       default:
         return "Bữa ăn";
     }
+  }
+
+  List<Map<String, dynamic>> _filterFoods(List<Map<String, dynamic>> foods) {
+    return foods
+        .where((food) =>
+            (food["name"] as String).toLowerCase().contains(search.toLowerCase()))
+        .toList();
   }
 
   @override
@@ -260,41 +288,67 @@ Widget _buildAnimatedMacroSection(
 
   // ================= LIST =================
   Widget _buildList() {
-    return ListView.builder(
-      itemCount: filteredFoods.length,
-      itemBuilder: (context, index) {
-        final food = filteredFoods[index];
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: foodsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(),
+          );
+        }
 
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(20),
-            onTap: () {
-              _showFoodBottomSheet(food);
-            },
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
+        if (snapshot.hasError) {
+          return Center(
+            child: Text("Lỗi: ${snapshot.error}"),
+          );
+        }
+
+        final foods = snapshot.data ?? [];
+        final filteredFoods = _filterFoods(foods);
+
+        if (filteredFoods.isEmpty) {
+          return const Center(
+            child: Text("Không tìm thấy món ăn"),
+          );
+        }
+
+        return ListView.builder(
+          itemCount: filteredFoods.length,
+          itemBuilder: (context, index) {
+            final food = filteredFoods[index];
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: InkWell(
                 borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    food["name"],
-                    style: const TextStyle(fontSize: 16),
+                onTap: () {
+                  _showFoodBottomSheet(food);
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  Text(
-                    "100 g - ${food["kcal"]} kcal",
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        food["name"],
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                      Text(
+                        "100 g - ${(food["calories"] as num).toInt()} kcal",
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -320,7 +374,7 @@ Widget _buildAnimatedMacroSection(
   }
   // ================= MACRO CHART =================
 Widget _buildMacroChart(Map<String, dynamic> food) {
-  final carb = (food["carb"] as num).toDouble();
+  final carbs = (food["carbs"] as num).toDouble();
   final protein = (food["protein"] as num).toDouble();
   final fat = (food["fat"] as num).toDouble();
 
@@ -332,9 +386,9 @@ Widget _buildMacroChart(Map<String, dynamic> food) {
         centerSpaceRadius: 40,
         sections: [
           PieChartSectionData(
-            value: carb,
+            value: carbs,
             color: Colors.blue,
-            title: "Carb",
+            title: "Carbs",
           ),
           PieChartSectionData(
             value: protein,

@@ -7,9 +7,9 @@ import com.senkim.nutrition.entity.User;
 import com.senkim.nutrition.entity.Health;
 import com.senkim.nutrition.repository.UserRepository;
 import com.senkim.nutrition.repository.HealthRepository;
-import service.dto.SignupRequest;
-import service.dto.LoginRequest;
-import service.dto.LoginResponse;
+import com.senkim.nutrition.dto.SignupRequest;
+import com.senkim.nutrition.dto.LoginRequest;
+import com.senkim.nutrition.dto.LoginResponse;
 
 import java.util.Optional;
 

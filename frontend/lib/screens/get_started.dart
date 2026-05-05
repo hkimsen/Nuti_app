@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'auth_screen.dart';
 
 class GetStartedScreen extends StatelessWidget {
   const GetStartedScreen({super.key});
@@ -57,12 +56,7 @@ class GetStartedScreen extends StatelessWidget {
                     elevation: 3,
                   ),
                   onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AuthScreen(initialTab: 0),
-                      ),
-                    );
+                    Navigator.of(context).pushNamed('/auth');
                   },
                   child: const Text(
                     "Đăng nhập",
@@ -89,12 +83,7 @@ class GetStartedScreen extends StatelessWidget {
                     elevation: 3,
                   ),
                   onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const AuthScreen(initialTab: 1),
-                      ),
-                    );
+                    Navigator.of(context).pushNamed('/auth-signup');
                   },
                   child: const Text(
                     "Đăng ký",

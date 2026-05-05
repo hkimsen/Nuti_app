@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../widgets/base_bottom_sheet.dart';
+import '../services/ai_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 enum SheetType {
   account,
@@ -7,11 +9,50 @@ enum SheetType {
   password,
 }
 
-class Account extends StatelessWidget {
+class Account extends StatefulWidget {
   const Account({super.key});
 
   @override
+  State<Account> createState() => _AccountState();
+}
+
+class _AccountState extends State<Account> {
+  String firstName = "";
+  String lastName = "";
+  String email = "";
+  String phone = "";
+  String gender = "";
+  String goal = "";
+  double? height;
+  double? weight;
+  double? bmi;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      firstName = prefs.getString('firstName') ?? "";
+      lastName = prefs.getString('lastName') ?? "";
+      email = prefs.getString('email') ?? "";
+      phone = prefs.getString('phone') ?? "";
+      gender = prefs.getString('gender') ?? "";
+      goal = prefs.getString('goal') ?? "";
+      height = prefs.getDouble('height');
+      weight = prefs.getDouble('weight');
+      bmi = prefs.getDouble('bmi');
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    String displayName = "$firstName $lastName".trim();
+    if (displayName.isEmpty) displayName = "Người dùng";
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       body: Column(
@@ -26,22 +67,22 @@ class Account extends StatelessWidget {
                 bottom: Radius.circular(30),
               ),
             ),
-            child: const Column(
+            child: Column(
               children: [
-                CircleAvatar(
+                const CircleAvatar(
                   radius: 40,
                   backgroundColor: Color(0xFFE8F5E9),
                   child: Icon(Icons.person, size: 40),
                 ),
-                SizedBox(height: 10),
+                const SizedBox(height: 10),
                 Text(
-                  "Kim Sen",
-                  style: TextStyle(
+                  displayName,
+                  style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                Text("123"),
+                Text(email),
               ],
             ),
           ),
@@ -138,7 +179,17 @@ class Account extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _SheetContent(type: type),
+      builder: (_) => _SheetContent(
+        type: type,
+        firstName: firstName,
+        lastName: lastName,
+        email: email,
+        phone: phone,
+        gender: gender,
+        goal: goal,
+        height: height,
+        weight: weight,
+      ),
     );
   }
 
@@ -155,11 +206,11 @@ class Account extends StatelessWidget {
             child: const Text("Hủy"),
           ),
           TextButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Đã đăng xuất")),
-              );
+              final prefs = await SharedPreferences.getInstance();
+              prefs.clear();
+              Navigator.of(context).pushReplacementNamed('/get-started');
             },
             child: const Text("Đăng xuất"),
           ),
@@ -174,8 +225,26 @@ class Account extends StatelessWidget {
 //
 class _SheetContent extends StatefulWidget {
   final SheetType type;
+  final String firstName;
+  final String lastName;
+  final String email;
+  final String phone;
+  final String gender;
+  final String goal;
+  final double? height;
+  final double? weight;
 
-  const _SheetContent({required this.type});
+  const _SheetContent({
+    required this.type,
+    required this.firstName,
+    required this.lastName,
+    required this.email,
+    required this.phone,
+    required this.gender,
+    required this.goal,
+    required this.height,
+    required this.weight,
+  });
 
   @override
   State<_SheetContent> createState() => _SheetContentState();
@@ -183,22 +252,62 @@ class _SheetContent extends StatefulWidget {
 
 class _SheetContentState extends State<_SheetContent> {
   bool isEdit = false;
+  final aiService = AiService();
 
   // controllers
-  final ho = TextEditingController(text: "Kim");
-  final ten = TextEditingController(text: "Sen");
-  final email = TextEditingController(text: "user@gmail.com");
-  final phone = TextEditingController(text: "0123456789");
+  late TextEditingController ho;
+  late TextEditingController ten;
+  late TextEditingController email;
+  late TextEditingController phone;
 
-  final height = TextEditingController(text: "170");
-  final weight = TextEditingController(text: "65");
+  late TextEditingController height;
+  late TextEditingController weight;
 
-  String gender = "Nam";
-  String goal = "Giảm cân";
+  late String gender;
+  late String goal;
 
   final oldPass = TextEditingController();
   final newPass = TextEditingController();
   final confirmPass = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    ho = TextEditingController(text: widget.firstName);
+    ten = TextEditingController(text: widget.lastName);
+    email = TextEditingController(text: widget.email);
+    phone = TextEditingController(text: widget.phone);
+    height = TextEditingController(text: widget.height?.toString() ?? "170");
+    weight = TextEditingController(text: widget.weight?.toString() ?? "65");
+    gender = widget.gender.isEmpty ? "Nam" : widget.gender;
+    goal = widget.goal.isEmpty ? "Giảm cân" : widget.goal;
+  }
+
+  @override
+  void dispose() {
+    ho.dispose();
+    ten.dispose();
+    email.dispose();
+    phone.dispose();
+    height.dispose();
+    weight.dispose();
+    oldPass.dispose();
+    newPass.dispose();
+    confirmPass.dispose();
+    super.dispose();
+  }
+  
+  double calculateBMI(double weight, double heightCm) {
+    final heightM = heightCm / 100;
+    return weight / (heightM * heightM);
+  }
+
+  String getBMICategory(double bmi) {
+    if (bmi < 18.5) return "Thiếu cân";
+    if (bmi < 25) return "Bình thường";
+    if (bmi < 30) return "Thừa cân";
+    return "Béo phì";
+  }
 
   // ================= TITLE =================
   String get title {
@@ -263,18 +372,118 @@ class _SheetContentState extends State<_SheetContent> {
     setState(() => isEdit = false);
   }
 
-  void save() {
-    if (widget.type == SheetType.password) {
-      if (newPass.text != confirmPass.text) {
+ void save() async {
+  if (widget.type == SheetType.account) {
+    // ===== SAVE ACCOUNT INFO =====
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('userId');
+
+      if (userId == null) {
+        throw Exception("User não foi autenticado");
+      }
+
+      print("DEBUG: Saving account - userId=$userId, firstName=${ho.text}, lastName=${ten.text}, email=${email.text}, phone=${phone.text}");
+
+      // Save to backend
+      final response = await aiService.saveUserAccount(
+        userId: userId,
+        firstName: ho.text,
+        lastName: ten.text,
+        email: email.text,
+        phone: phone.text,
+      );
+      
+      print("DEBUG: Backend response: $response");
+
+      // Save to local storage
+      prefs.setString('firstName', ho.text);
+      prefs.setString('lastName', ten.text);
+      prefs.setString('email', email.text);
+      prefs.setString('phone', phone.text);
+
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Mật khẩu không khớp")),
+          const SnackBar(content: Text("Lưu thông tin tài khoản thành công")),
         );
-        return;
+        setState(() => isEdit = false);
+      }
+    } catch (e) {
+      print("DEBUG: Error saving account: ${e.toString()}");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Lỗi: ${e.toString()}")),
+        );
       }
     }
-
-    setState(() => isEdit = false);
+    return;
   }
+
+  if (widget.type == SheetType.personal) {
+    final h = double.tryParse(height.text);
+    final w = double.tryParse(weight.text);
+
+    // ===== VALIDATE =====
+    if (h == null || w == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Nhập sai chiều cao hoặc cân nặng")),
+      );
+      return;
+    }
+
+    // ===== CALCULATE BMI =====
+    final bmi = calculateBMI(w, h);
+    final category = getBMICategory(bmi);
+
+    // ===== SHOW RESULT =====
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          "BMI: ${bmi.toStringAsFixed(1)} ($category)",
+        ),
+      ),
+    );
+
+    // ===== SAVE BACKEND =====
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getInt('userId');
+
+      if (userId != null) {
+        await aiService.saveUserHealth(
+          userId: userId,
+          height: h,
+          weight: w,
+          bmi: bmi,
+          gender: gender,
+          goal: goal,
+        );
+
+        // Save to local storage
+        prefs.setDouble('height', h);
+        prefs.setDouble('weight', w);
+        prefs.setDouble('bmi', bmi);
+        prefs.setString('gender', gender);
+        prefs.setString('goal', goal);
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Lỗi: ${e.toString()}")),
+      );
+    }
+  }
+
+  if (widget.type == SheetType.password) {
+    if (newPass.text != confirmPass.text) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Mật khẩu không khớp")),
+      );
+      return;
+    }
+  }
+
+  setState(() => isEdit = false);
+}
 
   @override
   Widget build(BuildContext context) {

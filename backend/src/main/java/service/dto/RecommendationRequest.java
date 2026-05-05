@@ -1,4 +1,4 @@
-package com.senkim.nutrition.dto;
+package service.dto;
 
 public class RecommendationRequest {
     public double weight;

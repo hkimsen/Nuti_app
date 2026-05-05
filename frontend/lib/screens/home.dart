@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 import '../services/ai_service.dart';
 import 'add_food.dart';
 
@@ -19,6 +19,7 @@ class _HomeState extends State<Home> {
   int? userId;
   Map<String, dynamic>? userData;
   List<Map<String, dynamic>>? meals;
+  List<Map<String, dynamic>> weightHistory = [];
   bool isLoading = true;
   String? error;
 
@@ -49,18 +50,25 @@ class _HomeState extends State<Home> {
 
       final selectedDateIso = DateFormat('yyyy-MM-dd').format(selectedDate);
 
+      final rangeFrom = DateFormat('yyyy-MM-dd').format(selectedDate.subtract(const Duration(days: 29)));
+
       // Load user data
       final user = await aiService.getUserData(userId!);
 
-      // Apply daily weight override if exists (stored locally by date)
-      final overridden = await _applyDailyWeightOverride(prefs, user, selectedDateIso);
-
       // Load meals for selected date
       final mealsList = await aiService.getUserMeals(userId!, date: selectedDateIso);
+      final history = await aiService.getWeightHistory(
+        userId!,
+        from: rangeFrom,
+        to: selectedDateIso,
+      );
+      final selectedWeight = _findWeightByDate(history, selectedDateIso);
+      final mergedUser = _mergeWeightIntoUserData(user, selectedWeight);
 
       setState(() {
-        userData = overridden;
+        userData = mergedUser;
         meals = mealsList;
+        weightHistory = history;
         isLoading = false;
       });
     } catch (e) {
@@ -98,43 +106,38 @@ class _HomeState extends State<Home> {
     }
   }
 
-  Future<Map<String, dynamic>> _applyDailyWeightOverride(
-    SharedPreferences prefs,
-    Map<String, dynamic> user,
-    String dateIso,
-  ) async {
-    final raw = prefs.getString('weightLogs');
-    if (raw == null || raw.isEmpty) return user;
+  double? _toDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
+  }
 
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) return user;
-      final wRaw = decoded[dateIso];
-      if (wRaw == null) return user;
+  String? _toDateString(dynamic value) {
+    if (value is String) return value;
+    return null;
+  }
 
-      final weight = (wRaw as num).toDouble();
-      final heightRaw = user['height'];
-      if (heightRaw is num && heightRaw.toDouble() > 0) {
-        final heightM = heightRaw.toDouble() / 100.0;
-        final bmi = weight / (heightM * heightM);
-        return {
-          ...user,
-          'weight': weight,
-          'bmi': bmi,
-        };
+  double? _findWeightByDate(List<Map<String, dynamic>> history, String dateIso) {
+    for (final item in history.reversed) {
+      if (_toDateString(item['date']) == dateIso) {
+        return _toDouble(item['weight']);
       }
-
-      return {
-        ...user,
-        'weight': weight,
-      };
-    } catch (_) {
-      return user;
     }
+    return null;
+  }
+
+  Map<String, dynamic> _mergeWeightIntoUserData(Map<String, dynamic> user, double? selectedWeight) {
+    if (selectedWeight == null) return user;
+    final merged = {...user, 'weight': selectedWeight};
+    final h = _toDouble(user['height']);
+    if (h != null && h > 0) {
+      final heightM = h / 100.0;
+      merged['bmi'] = selectedWeight / (heightM * heightM);
+    }
+    return merged;
   }
 
   Future<void> _promptUpdateDailyWeight() async {
-    final prefs = await SharedPreferences.getInstance();
     final dateIso = DateFormat('yyyy-MM-dd').format(selectedDate);
     final current = userData?['weight'];
 
@@ -174,18 +177,12 @@ class _HomeState extends State<Home> {
     controller.dispose();
     if (result == null) return;
 
-    Map<String, dynamic> logs = {};
-    final raw = prefs.getString('weightLogs');
-    if (raw != null && raw.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map) {
-          logs = Map<String, dynamic>.from(decoded);
-        }
-      } catch (_) {}
-    }
-    logs[dateIso] = result;
-    await prefs.setString('weightLogs', jsonEncode(logs));
+    if (userId == null) return;
+    await aiService.saveDailyWeight(
+      userId: userId!,
+      weight: result,
+      date: dateIso,
+    );
 
     if (!mounted) return;
     setState(() {
@@ -277,6 +274,8 @@ class _HomeState extends State<Home> {
                 // Calories Card
                 _buildCaloriesCard(currentCalories, tdee, progress),
                 const SizedBox(height: 16),
+                _buildWeightProgressCard(),
+                const SizedBox(height: 16),
                 // Meals Section
                 _buildMealsSection(),
                 const SizedBox(height: 20),
@@ -334,15 +333,6 @@ class _HomeState extends State<Home> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: _promptUpdateDailyWeight,
-                icon: const Icon(Icons.monitor_weight_outlined, size: 18),
-                label: const Text("Cập nhật cân nặng theo ngày"),
-              ),
-            ),
           ],
         ),
       ),
@@ -352,7 +342,6 @@ class _HomeState extends State<Home> {
   Widget _buildBMICard() {
     final bmi = userData!['bmi'] as num?;
     final weight = userData!['weight'] as num?;
-    final height = userData!['height'] as num?;
     final bmiValue = bmi?.toDouble();
 
     String getBMIStatus(double bmi) {
@@ -371,26 +360,20 @@ class _HomeState extends State<Home> {
 
     final bmiStatus = bmiValue != null ? getBMIStatus(bmiValue) : "Chưa có dữ liệu";
     final bmiColor = bmiValue != null ? getBMIColor(bmiValue) : Colors.grey;
-    final bmiProgress = bmiValue == null ? 0.0 : ((bmiValue - 15) / 20).clamp(0.0, 1.0);
+    final bmiProgress = bmiValue == null ? 0.0 : ((bmiValue - 16) / 14).clamp(0.0, 1.0);
+    final tdee = calculateTDEE();
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            lightPurple,
-            primaryPurple.withOpacity(0.75),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: primaryPurple.withOpacity(0.22),
-            blurRadius: 14,
-            offset: const Offset(0, 6),
+            color: const Color(0xFF6A5ACD).withOpacity(0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
@@ -400,135 +383,36 @@ class _HomeState extends State<Home> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                "Chỉ số cơ thể",
-                style: TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF2B2142),
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Sức khỏe hôm nay",
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1F2937),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    DateFormat('dd/MM/yyyy').format(selectedDate),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  color: bmiColor.withOpacity(0.15),
+                  color: bmiColor.withOpacity(0.14),
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   bmiStatus,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: bmiColor,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              SizedBox(
-                width: 108,
-                height: 108,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    SizedBox(
-                      width: 108,
-                      height: 108,
-                      child: CircularProgressIndicator(
-                        value: bmiProgress,
-                        strokeWidth: 9,
-                        backgroundColor: Colors.white.withOpacity(0.65),
-                        valueColor: AlwaysStoppedAnimation<Color>(bmiColor),
-                      ),
-                    ),
-                    Container(
-                      width: 84,
-                      height: 84,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Colors.white.withOpacity(0.92),
-                        border: Border.all(
-                          color: Colors.white,
-                          width: 1.5,
-                        ),
-                      ),
-                    ),
-                    Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          bmi?.toStringAsFixed(1) ?? "N/A",
-                          style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF1F1A2D),
-                          ),
-                        ),
-                        const Text(
-                          "BMI",
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Color(0xFF6B7280),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      bmiValue != null
-                          ? "BMI của bạn đang ở mức $bmiStatus"
-                          : "Cập nhật cân nặng và chiều cao để có BMI",
-                      style: const TextStyle(
-                        fontSize: 14,
-                        height: 1.3,
-                        color: Color(0xFF3F3A52),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: LinearProgressIndicator(
-                        value: bmiProgress,
-                        minHeight: 8,
-                        backgroundColor: Colors.white.withOpacity(0.65),
-                        valueColor: AlwaysStoppedAnimation<Color>(bmiColor),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: const [
-                        Text(
-                          "15",
-                          style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-                        ),
-                        Text(
-                          "18.5",
-                          style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-                        ),
-                        Text(
-                          "25",
-                          style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-                        ),
-                        Text(
-                          "35",
-                          style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-                        ),
-                      ],
-                    ),
-                  ],
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12, color: bmiColor),
                 ),
               ),
             ],
@@ -536,19 +420,93 @@ class _HomeState extends State<Home> {
           const SizedBox(height: 14),
           Row(
             children: [
-              Expanded(
-                child: _buildBodyInfoTag(
-                  label: "Cân nặng",
-                  value: "${weight?.toStringAsFixed(1) ?? 'N/A'} kg",
+              Container(
+                width: 94,
+                height: 94,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [bmiColor.withOpacity(0.18), Colors.white],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox(
+                      width: 84,
+                      height: 84,
+                      child: CircularProgressIndicator(
+                        value: bmiProgress,
+                        strokeWidth: 7,
+                        backgroundColor: Colors.grey.shade200,
+                        valueColor: AlwaysStoppedAnimation<Color>(bmiColor),
+                      ),
+                    ),
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          bmi?.toStringAsFixed(1) ?? "--",
+                          style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
+                        ),
+                        const Text("BMI", style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 14),
               Expanded(
-                child: _buildBodyInfoTag(
-                  label: "Chiều cao",
-                  value: "${height?.toStringAsFixed(0) ?? 'N/A'} cm",
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      bmiValue != null
+                          ? "BMI của bạn đang ở mức $bmiStatus."
+                          : "Cập nhật cân nặng để theo dõi BMI.",
+                      style: const TextStyle(fontSize: 13, height: 1.35, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildMetricTile(
+                            title: "TDEE mục tiêu",
+                            value: tdee > 0 ? "${tdee.toInt()} kcal" : "--",
+                            color: const Color(0xFF6A5ACD),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _buildWeightTile(weight),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: bmiProgress,
+              minHeight: 7,
+              backgroundColor: Colors.grey.shade200,
+              valueColor: AlwaysStoppedAnimation<Color>(bmiColor),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: const [
+              Text("16", style: TextStyle(fontSize: 10, color: Color(0xFF6B7280))),
+              Text("18.5", style: TextStyle(fontSize: 10, color: Color(0xFF6B7280))),
+              Text("25", style: TextStyle(fontSize: 10, color: Color(0xFF6B7280))),
+              Text("30+", style: TextStyle(fontSize: 10, color: Color(0xFF6B7280))),
             ],
           ),
         ],
@@ -556,31 +514,70 @@ class _HomeState extends State<Home> {
     );
   }
 
-  Widget _buildBodyInfoTag({required String label, required String value}) {
+  Widget _buildMetricTile({
+    required String title,
+    required String value,
+    required Color color,
+  }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.72),
+        color: color.withOpacity(0.08),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            label,
-            style: const TextStyle(
-              fontSize: 12,
-              color: Color(0xFF6B7280),
-              fontWeight: FontWeight.w600,
-            ),
+            title,
+            style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 2),
           Text(
             value,
-            style: const TextStyle(
-              fontSize: 14,
-              color: Color(0xFF1F2937),
-              fontWeight: FontWeight.w700,
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWeightTile(num? weight) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2E7D32).withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Cân nặng",
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  "${weight?.toStringAsFixed(1) ?? '--'} kg",
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Color(0xFF2E7D32)),
+                ),
+              ],
+            ),
+          ),
+          InkWell(
+            onTap: _promptUpdateDailyWeight,
+            borderRadius: BorderRadius.circular(999),
+            child: Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                color: const Color(0xFF2E7D32).withOpacity(0.16),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.add, size: 16, color: Color(0xFF1B5E20)),
             ),
           ),
         ],
@@ -650,6 +647,201 @@ class _HomeState extends State<Home> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildWeightProgressCard() {
+    final points = <FlSpot>[];
+    final labels = <String>[];
+
+    for (var i = 0; i < weightHistory.length; i++) {
+      final item = weightHistory[i];
+      final w = _toDouble(item['weight']);
+      if (w == null) continue;
+      points.add(FlSpot(points.length.toDouble(), w));
+      labels.add(_toDateString(item['date']) ?? '');
+    }
+    final weights = points.map((e) => e.y).toList();
+    final minY = weights.isEmpty ? 0.0 : (weights.reduce((a, b) => a < b ? a : b) - 0.3);
+    final maxY = weights.isEmpty ? 1.0 : (weights.reduce((a, b) => a > b ? a : b) + 0.3);
+    final latestWeight = weights.isEmpty ? null : weights.last;
+    final firstWeight = weights.isEmpty ? null : weights.first;
+    final delta = (latestWeight != null && firstWeight != null) ? latestWeight - firstWeight : null;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF6A5ACD).withOpacity(0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Tiến trình cân nặng (30 ngày)",
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Ngày chọn: ${DateFormat('dd/MM/yyyy').format(selectedDate)}",
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+          ),
+          if (latestWeight != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                _buildMiniStat(
+                  "Hiện tại",
+                  "${latestWeight.toStringAsFixed(1)} kg",
+                  const Color(0xFF6A5ACD),
+                ),
+                const SizedBox(width: 8),
+                _buildMiniStat(
+                  "Thay đổi",
+                  delta == null ? "--" : "${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(1)} kg",
+                  delta != null && delta <= 0 ? const Color(0xFF2E7D32) : const Color(0xFFEF6C00),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 14),
+          if (points.isEmpty)
+            Text(
+              "Chưa có dữ liệu cân nặng. Hãy cập nhật cân nặng hôm nay.",
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            )
+          else
+            SizedBox(
+              height: 190,
+              child: LineChart(
+                LineChartData(
+                  minX: 0,
+                  maxX: (points.length - 1).toDouble(),
+                  minY: minY,
+                  maxY: maxY,
+                  lineTouchData: LineTouchData(
+                    touchTooltipData: LineTouchTooltipData(
+                      tooltipPadding: const EdgeInsets.all(8),
+                      getTooltipItems: (touchedSpots) {
+                        return touchedSpots.map((spot) {
+                          final idx = spot.x.toInt().clamp(0, labels.length - 1);
+                          final iso = labels[idx];
+                          final date = iso.isEmpty ? '' : DateFormat('dd/MM').format(DateTime.parse(iso));
+                          return LineTooltipItem(
+                            "$date\n${spot.y.toStringAsFixed(1)} kg",
+                            const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                          );
+                        }).toList();
+                      },
+                    ),
+                  ),
+                  gridData: FlGridData(
+                    show: true,
+                    drawVerticalLine: false,
+                    horizontalInterval: ((maxY - minY) / 4).clamp(0.1, 2.0),
+                    getDrawingHorizontalLine: (_) => FlLine(
+                      color: const Color(0xFFE8EAF1),
+                      strokeWidth: 1,
+                      dashArray: [6, 4],
+                    ),
+                  ),
+                  titlesData: FlTitlesData(
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    leftTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 42,
+                        interval: ((maxY - minY) / 4).clamp(0.1, 2.0),
+                        getTitlesWidget: (value, meta) => Text(
+                          value.toStringAsFixed(1),
+                          style: const TextStyle(fontSize: 10, color: Color(0xFF6B7280)),
+                        ),
+                      ),
+                    ),
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 30,
+                        interval: points.length > 8 ? (points.length / 4).ceilToDouble() : 1,
+                        getTitlesWidget: (value, meta) {
+                          final idx = value.toInt();
+                          if (idx < 0 || idx >= labels.length) return const SizedBox.shrink();
+                          final iso = labels[idx];
+                          if (iso.isEmpty) return const SizedBox.shrink();
+                          return Text(
+                            DateFormat('dd/MM').format(DateTime.parse(iso)),
+                            style: const TextStyle(fontSize: 10),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  borderData: FlBorderData(show: false),
+                  lineBarsData: [
+                    LineChartBarData(
+                      spots: points,
+                      isCurved: true,
+                      color: const Color(0xFF6A5ACD),
+                      barWidth: 3.2,
+                      dotData: FlDotData(
+                        show: true,
+                        getDotPainter: (spot, percent, barData, index) {
+                          final isLatest = index == points.length - 1;
+                          return FlDotCirclePainter(
+                            radius: isLatest ? 4.2 : 3.0,
+                            color: const Color(0xFF6A5ACD),
+                            strokeWidth: isLatest ? 1.8 : 1.2,
+                            strokeColor: Colors.white,
+                          );
+                        },
+                      ),
+                      belowBarData: BarAreaData(
+                        show: true,
+                        gradient: LinearGradient(
+                          colors: [
+                            const Color(0xFF6A5ACD).withOpacity(0.2),
+                            const Color(0xFF6A5ACD).withOpacity(0.02),
+                          ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMiniStat(String label, String value, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+            const SizedBox(height: 2),
+            Text(value, style: TextStyle(fontWeight: FontWeight.w700, color: color)),
+          ],
+        ),
       ),
     );
   }

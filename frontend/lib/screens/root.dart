@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'home.dart';
-import 'foods.dart';
+import 'meal_plan_screen.dart';
 import 'account.dart';
 
 class Root extends StatefulWidget {
@@ -15,7 +15,7 @@ class _RootState extends State<Root> {
 
   final List<Widget> pages = const [
     Home(),
-    Foods(),
+    MealPlanScreen(),
     Account(),
   ];
 
@@ -37,7 +37,7 @@ class _RootState extends State<Root> {
           NavigationDestination(
             icon: Icon(Icons.restaurant_outlined),
             selectedIcon: Icon(Icons.restaurant),
-            label: "Foods",
+            label: "Meal Plan",
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),
