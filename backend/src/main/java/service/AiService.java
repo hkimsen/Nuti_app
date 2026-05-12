@@ -15,7 +15,7 @@ import java.util.Map;
 @Service
 public class AiService {
 
-    private final String API_KEY = "YOUR_API_KEY";
+    private final String API_KEY = "AIzaSyBgNFNOXsYMijT7kk26KqpS3yEJi_jx1c8";
     private final ObjectMapper mapper = new ObjectMapper();
 
     public JsonNode generateMealPlan(Map<String, Object> data) {

@@ -662,9 +662,9 @@ class _HomeState extends State<Home> {
       points.add(FlSpot(points.length.toDouble(), w));
       labels.add(_toDateString(item['date']) ?? '');
     }
-    final weights = points.map((e) => e.y).toList();
-    final minY = weights.isEmpty ? 0.0 : (weights.reduce((a, b) => a < b ? a : b) - 0.3);
-    final maxY = weights.isEmpty ? 1.0 : (weights.reduce((a, b) => a > b ? a : b) + 0.3);
+    final weights = points.map((e) => e.y!).toList();
+    final minY = weights.isEmpty ? 0.0 : (weights.reduce((a, b) => a! < b! ? a : b) - 0.3);
+    final maxY = weights.isEmpty ? 1.0 : (weights.reduce((a, b) => a! > b! ? a : b) + 0.3);
     final latestWeight = weights.isEmpty ? null : weights.last;
     final firstWeight = weights.isEmpty ? null : weights.first;
     final delta = (latestWeight != null && firstWeight != null) ? latestWeight - firstWeight : null;
@@ -737,7 +737,7 @@ class _HomeState extends State<Home> {
                           final iso = labels[idx];
                           final date = iso.isEmpty ? '' : DateFormat('dd/MM').format(DateTime.parse(iso));
                           return LineTooltipItem(
-                            "$date\n${spot.y.toStringAsFixed(1)} kg",
+                            "$date\n${spot.y!.toStringAsFixed(1)} kg",
                             const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                           );
                         }).toList();

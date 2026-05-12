@@ -109,7 +109,12 @@ void _showFoodBottomSheet(Map<String, dynamic> food) {
 
 Widget _buildAnimatedMacroSection(
     double carbs, double protein, double fat, double calories) {
+  // Calculate total for pie chart
   final total = carbs + protein + fat;
+  // Avoid division by zero
+  final carbsPercent = total > 0 ? carbs / total * 100 : 0;
+  final proteinPercent = total > 0 ? protein / total * 100 : 0;
+  final fatPercent = total > 0 ? fat / total * 100 : 0;
 
   return Container(
     padding: const EdgeInsets.fromLTRB(90, 20, 90, 20), // Tăng padding để thoáng hơn
@@ -137,26 +142,26 @@ Widget _buildAnimatedMacroSection(
                 PieChartData(
                   sectionsSpace: 2,
                   centerSpaceRadius: 40,
-                  sections: [
+                  sections: total > 0 ? [
                     PieChartSectionData(
-                      value: carbs,
+                      value: carbsPercent,
                       color: const Color(0xFF90CAF9),
                       radius: 20, // Độ dày của vòng tròn
                       title: "",
                     ),
                     PieChartSectionData(
-                      value: protein,
+                      value: proteinPercent,
                       color: const Color(0xFFA5D6A7),
                       radius: 20,
                       title: "",
                     ),
                     PieChartSectionData(
-                      value: fat,
+                      value: fatPercent,
                       color: const Color(0xFFFFCC80),
                       radius: 20,
                       title: "",
                     ),
-                  ],
+                  ] : [],
                 ),
               ),
               Column(
@@ -372,39 +377,9 @@ Widget _buildAnimatedMacroSection(
       ),
     );
   }
-  // ================= MACRO CHART =================
-Widget _buildMacroChart(Map<String, dynamic> food) {
-  final carbs = (food["carbs"] as num).toDouble();
-  final protein = (food["protein"] as num).toDouble();
-  final fat = (food["fat"] as num).toDouble();
-
-  return SizedBox(
-    height: 180,
-    child: PieChart(
-      PieChartData(
-        sectionsSpace: 2,
-        centerSpaceRadius: 40,
-        sections: [
-          PieChartSectionData(
-            value: carbs,
-            color: Colors.blue,
-            title: "Carbs",
-          ),
-          PieChartSectionData(
-            value: protein,
-            color: Colors.green,
-            title: "Protein",
-          ),
-          PieChartSectionData(
-            value: fat,
-            color: Colors.orange,
-            title: "Fat",
-          ),
-        ],
-      ),
-    ),
-  );
-}
+  // ================= MACRO CHART (UNUSED) =================
+  // This function is not currently used in the build
+  // Kept for future reference
 
   // ================= GRAM INPUT =================
 

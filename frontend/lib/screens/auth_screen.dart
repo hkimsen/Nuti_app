@@ -123,7 +123,7 @@ class _AuthScreenState extends State<AuthScreen>
     setState(() => isLoadingSignup = true);
 
     try {
-      final result = await aiService.signup(
+      await aiService.signup(
         firstName: firstNameCtrl.text,
         lastName: lastNameCtrl.text,
         email: emailSignupCtrl.text,

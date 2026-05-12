@@ -1,7 +1,8 @@
-package com.senkim.nutrition.service;
+package service;
+
+import org.springframework.stereotype.Service;
 
 import service.dto.RecommendationRequest;
-import org.springframework.stereotype.Service;
 
 @Service
 public class PromptService {
